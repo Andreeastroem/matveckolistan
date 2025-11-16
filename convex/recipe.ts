@@ -13,6 +13,7 @@ import {
   addRecipeLinkVArgs,
 } from "./recipeFunctions/upsertFunctions";
 import { paginationOptsValidator } from "convex/server";
+import { tagCategories } from "./types";
 
 export const getRecipeBySlug = query({
   args: {
@@ -170,6 +171,18 @@ export const getRecipesByUser = query({
     //filter out null values from recipes
     const filteredRecipes = recipes.filter((recipe) => recipe !== null);
     return filteredRecipes;
+  },
+});
+
+export const getAllTagsByCategory = query({
+  args: { category: tagCategories },
+  handler: async (ctx, args) => {
+    const tags = await ctx.db
+      .query("tags")
+      .filter((q) => q.eq(q.field("category"), args.category))
+      .collect();
+
+    return tags;
   },
 });
 

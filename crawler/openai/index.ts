@@ -1,12 +1,17 @@
 import OpenAI from "openai";
 import { z } from "zod";
-import { IngredientSchema, InstructionSchema } from "../../convex/types";
+import {
+  IngredientSchema,
+  InstructionSchema,
+  RecipeTagSchema,
+} from "../../convex/types";
 
 const client = new OpenAI();
 
 const recipeSchema = z.object({
   ingredients: z.array(IngredientSchema),
   instructions: z.array(InstructionSchema),
+  tags: z.array(RecipeTagSchema),
 });
 
 const ingredientsCaveats = `
@@ -22,8 +27,13 @@ There are some caveats to the ingredients amount field:
 const instructionsCaveats = `
 There are some caveats regarding the instructions field:
     - There is not always a number to the instruction, it should be inferred from the context at what stage we are currently are
-    - I do not want the text to be altered, it should be copied as is. The whole step text should be unaltered.
-    - If there are several ways to approach the process (for example oven or fryer) choose one - preferably the recommended one. If there is no recommended use the most accessible
+    - I do not want the text to be altered, it should be copied as is. The whole step text must be unaltered.
+    - If there are several ways to approach the process (for example oven or fryer) choose one - preferably the recommended one. If there is no recommended use the most accessible (meaning the one with less specialised cooking utensils)
+`;
+
+const tagInstructions = `
+  Deduce from the ingredients and instructions what the most appropriate tags should be, there should be between 1-3 tags for each category. 
+  
 `;
 
 const outputFormatSchema = z.object({

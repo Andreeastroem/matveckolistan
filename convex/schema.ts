@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
+import { tagCategories } from "./types";
 
 // The schema is normally optional, but Convex Auth
 // requires indexes defined on `authTables`.
@@ -65,6 +66,7 @@ export default defineSchema({
 
   tags: defineTable({
     name: v.string(),
+    category: tagCategories,
   }),
 
   recipeTag: defineTable({
