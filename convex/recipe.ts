@@ -4,18 +4,20 @@ import {
   query,
   internalAction,
   internalMutation,
+  internalQuery,
 } from "./_generated/server";
 import { v } from "convex/values";
 
-import { crawlRecipes } from "../crawler";
+import { CrawlRecipeById, crawlRecipes } from "../crawler";
 import {
   upsertRecipeLink,
   addRecipeLinkVArgs,
+  addRecipeVArgs,
 } from "./recipeFunctions/upsertFunctions";
 import { paginationOptsValidator } from "convex/server";
-import { tagCategories } from "./types";
+import { tagSchema, tagCategories } from "./types";
 
-export const getRecipeBySlug = query({
+export const getRecipesBySlug = query({
   args: {
     slug: v.string(),
   },
@@ -174,6 +176,26 @@ export const getRecipesByUser = query({
   },
 });
 
+export const getRecipeLinkById = internalQuery({
+  args: { id: v.id("recipeLinks") },
+  handler: async (ctx, args) => {
+    const recipeLinkUser = await ctx.db
+      .query("recipeLinkUsers")
+      .filter((q) => q.eq(q.field("recipeLinkId"), args.id))
+      .unique();
+    const recipeLink = await ctx.db.get(args.id);
+
+    if (!recipeLinkUser || !recipeLink) {
+      return null;
+    }
+
+    return {
+      user: recipeLinkUser._id,
+      ...recipeLink,
+    };
+  },
+});
+
 export const getAllTagsByCategory = query({
   args: { category: tagCategories },
   handler: async (ctx, args) => {
@@ -183,6 +205,107 @@ export const getAllTagsByCategory = query({
       .collect();
 
     return tags;
+  },
+});
+
+export const getTagsForRecipeId = query({
+  args: { recipeId: v.id("recipes") },
+  handler: async (ctx, args) => {
+    const recipeTagRows = await ctx.db
+      .query("recipeTag")
+      .withIndex("recipeId", (q) => q.eq("recipeId", args.recipeId))
+      .collect();
+
+    if (recipeTagRows.length === 0) return [];
+
+    const tagResults = await Promise.all(
+      recipeTagRows.map((rt) => ctx.db.get(rt.tagId)),
+    );
+
+    return tagResults.filter((t) => t !== null) as NonNullable<
+      (typeof tagResults)[number]
+    >[];
+  },
+});
+export const removeTagsForRecipeId = internalMutation({
+  args: { recipeId: v.id("recipes") },
+  handler: async (ctx, args) => {
+    const recipeTagRows = await ctx.db
+      .query("recipeTag")
+      .withIndex("recipeId", (q) => q.eq("recipeId", args.recipeId))
+      .collect();
+
+    await Promise.all(
+      recipeTagRows.map((rt) => {
+        return ctx.db.delete(rt._id);
+      }),
+    );
+  },
+});
+export const addTagsForRecipeId = internalMutation({
+  args: { recipeId: v.id("recipes"), tags: v.array(tagSchema) },
+  handler: async (ctx, args) => {
+    await Promise.all(
+      args.tags.map(async (tag) => {
+        const tagsWithName = await ctx.db
+          .query("tags")
+          .withIndex("name")
+          .collect();
+        const tagExists = tagsWithName.find(
+          (tagWithName) => tagWithName.category === tag.category,
+        );
+        if (tagExists !== undefined) {
+          // Tag already exists, connect to recipeId
+          await ctx.db.insert("recipeTag", {
+            recipeId: args.recipeId,
+            tagId: tagExists._id,
+          });
+        }
+
+        // Tag does not exists, add it
+        const id = await ctx.db.insert("tags", {
+          category: tag.category,
+          name: tag.name,
+        });
+
+        await ctx.db.insert("recipeTag", {
+          recipeId: args.recipeId,
+          tagId: id,
+        });
+      }),
+    );
+  },
+});
+
+export const getTagsForRecipeSlug = query({
+  args: { slug: v.string() },
+  handler: async (ctx, args) => {
+    const recipes = await ctx.db
+      .query("recipes")
+      .withIndex("slug", (q) => q.eq("slug", args.slug))
+      .collect();
+
+    if (recipes.length === 0) return [];
+
+    const allTagsArrays = await Promise.all(
+      recipes.map((r) =>
+        ctx.db
+          .query("recipeTag")
+          .withIndex("recipeId", (q) => q.eq("recipeId", r._id))
+          .collect(),
+      ),
+    );
+
+    const recipeTagRows = allTagsArrays.flat();
+    if (recipeTagRows.length === 0) return [];
+
+    const tagResults = await Promise.all(
+      recipeTagRows.map((rt) => ctx.db.get(rt.tagId)),
+    );
+
+    return tagResults.filter((t) => t !== null) as NonNullable<
+      (typeof tagResults)[number]
+    >[];
   },
 });
 
@@ -305,10 +428,12 @@ export const crawlRecipesAction = internalAction({
   },
 });
 
-export const addRecipeToDatabase = internalMutation({
-  args: addRecipeLinkVArgs,
+export const crawlRecipeLinkById = internalAction({
+  args: { recipeLinkId: v.id("recipeLinks") },
   handler: async (ctx, args) => {
-    await upsertRecipeLink(ctx, args);
+    await CrawlRecipeById(ctx, args.recipeLinkId);
+
+    return null;
   },
 });
 
@@ -325,7 +450,7 @@ export const recrawlAllRecipesAction = internalMutation({
     const allRecipesLinks = await ctx.db.query("recipeLinks").collect();
     await Promise.all(
       allRecipesLinks.map((recipe) =>
-        ctx.db.patch(recipe._id, { isCrawled: false }),
+        ctx.db.patch(recipe._id, { isCrawled: false, retries: 0 }),
       ),
     );
   },
@@ -342,5 +467,12 @@ export const incrementRetryOnRecipeLink = internalMutation({
       ...existing,
       retries: existing.retries + 1,
     });
+  },
+});
+
+export const getAllTags = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return ctx.db.query("tags").collect();
   },
 });

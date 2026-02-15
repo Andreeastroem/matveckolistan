@@ -1,9 +1,10 @@
 import { GenericMutationCtx } from "convex/server";
 import { DataModel, Id } from "../_generated/dataModel.js";
+import { api, internal } from "../_generated/api.js";
 import { inverseIntersection } from "./intersection";
 
 import { Infer, v } from "convex/values";
-import { Ingredient } from "../types.js";
+import { Ingredient, Tag, TagCategories, tagCategories } from "../types.js";
 
 const recipeVArgs = v.object({
   recipeLinkId: v.optional(v.id("recipeLinks")),
@@ -30,6 +31,12 @@ const recipeVArgs = v.object({
       ),
       v.null(),
     ),
+  ),
+  tags: v.array(
+    v.object({
+      category: tagCategories,
+      name: v.string(),
+    }),
   ),
 });
 
@@ -81,7 +88,7 @@ async function upsertInstructionsForRecipeLink(
   );
 }
 
-async function upsertIngriedientsForRecipeLink(
+async function upsertIngredientsForRecipeLink(
   ctx: GenericMutationCtx<DataModel>,
   recipeLink: string,
   recipeId: Id<"recipes">,
@@ -138,6 +145,34 @@ async function upsertIngriedientsForRecipeLink(
   }
 }
 
+async function upsertTagsForRecipe(
+  ctx: GenericMutationCtx<DataModel>,
+  recipeId: Id<"recipes">,
+  tags: Tag[],
+) {
+  const existingTags = await ctx.runQuery(api.recipe.getTagsForRecipeId, {
+    recipeId,
+  });
+
+  const uniqueTags = inverseIntersection<{
+    name: string;
+    category: TagCategories;
+  }>(tags, existingTags, (a, b) => {
+    if (a.category === b.category) {
+      return a.name === b.name;
+    }
+    return false;
+  });
+
+  if (uniqueTags.length === 0) {
+    return;
+  }
+
+  await ctx.runMutation(internal.recipe.removeTagsForRecipeId, { recipeId });
+
+  await ctx.runMutation(internal.recipe.addTagsForRecipeId, { recipeId, tags });
+}
+
 async function removeRecipe(
   ctx: GenericMutationCtx<DataModel>,
   recipeId: Id<"recipes">,
@@ -189,7 +224,7 @@ export async function upsertRecipeLink(
         recipeId = matchingRecipe._id;
       }
 
-      await upsertIngriedientsForRecipeLink(
+      await upsertIngredientsForRecipeLink(
         ctx,
         existingRecipeLink.link,
         recipeId,
@@ -202,6 +237,8 @@ export async function upsertRecipeLink(
         recipeId,
         recipe?.instructions ?? null,
       );
+      await upsertTagsForRecipe(ctx, recipeId, recipe.tags);
+
       if (matchingRecipe) {
         await ctx.db.patch(recipeId, {
           name: matchingRecipe.name,

@@ -67,10 +67,14 @@ export default defineSchema({
   tags: defineTable({
     name: v.string(),
     category: tagCategories,
-  }),
+  })
+    .index("name", ["name"])
+    .index("category", ["category"]),
 
   recipeTag: defineTable({
     recipeId: v.id("recipes"),
     tagId: v.id("tags"),
-  }),
+  })
+    .index("recipeId", ["recipeId"])
+    .index("tagId", ["tagId"]),
 });

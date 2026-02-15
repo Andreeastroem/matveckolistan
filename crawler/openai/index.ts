@@ -4,6 +4,7 @@ import {
   IngredientSchema,
   InstructionSchema,
   RecipeTagSchema,
+  TagCategories,
 } from "../../convex/types";
 
 const client = new OpenAI();
@@ -32,17 +33,23 @@ There are some caveats regarding the instructions field:
 `;
 
 const tagInstructions = `
-  Deduce from the ingredients and instructions what the most appropriate tags should be, there should be between 1-3 tags for each category. 
-  
+  Deduce from the ingredients and instructions what the most appropriate tags should be, there should be between 1-3 tags for each category.
+  All tags should be in english.
+  Before creating a new tag, compare to see if a similar one is already supplied in the appended tagslist.
+  Only create a new tag if no match could be found.
+  If the same value could be used as both a cuisine and a diet, prefer to only use it as a diet and omit it from the cuisine category.
 `;
 
 const outputFormatSchema = z.object({
   recipes: z.array(recipeSchema).nullable(),
 });
 
+export type CrawledRecipe = z.infer<typeof recipeSchema>;
+
 export async function crawlRecipeFromHTMLBody(
   htmlBody: string,
-): Promise<z.infer<typeof outputFormatSchema>["recipes"] | null> {
+  allTags: { [K in TagCategories]: string[] },
+): Promise<CrawledRecipe[] | null> {
   try {
     const response = await client.responses.create({
       model: "gpt-5-nano",
@@ -65,7 +72,16 @@ export async function crawlRecipeFromHTMLBody(
           content: instructionsCaveats,
         },
         {
+          role: "system",
+          content: `All existing tags: ${allTags}`,
+        },
+        {
+          role: "system",
+          content: tagInstructions,
+        },
+        {
           role: "user",
+          // How should I mitigate prompt injections as part of instruction texts etc?
           content: `This is the html content: ${htmlBody}`,
         },
       ],
